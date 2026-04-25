@@ -112,10 +112,25 @@ services:
       mock-hip:
         condition: service_healthy
     environment:
-      GATEWAY_URL:      http://mock-gateway:8000
-      HIU_CALLBACK_URL: http://oncosearch-hiu:8002/v0.5/health-information/transfer
-      DATABASE_URL:     postgresql://oncosearch_user:oncosearch_pass@oncosearch-postgres:5432/oncosearch_db
+      GATEWAY_URL:         http://mock-gateway:8000
+      HIU_CALLBACK_URL:    http://oncosearch-hiu:8002/v0.5/health-information/transfer
+      DATABASE_URL:        postgresql://oncosearch_user:oncosearch_pass@oncosearch-postgres:5432/oncosearch_db
       DATA_RETENTION_DAYS: "31"
+
+  # ----------------------------------------------------------
+  # Retention worker — runs APScheduler in its own container.
+  # Keeping it separate means HIU replicas can scale freely
+  # without spawning duplicate cleanup processes.
+  oncosearch-retention-worker:
+    build:
+      context: ./oncosearch-retention-worker
+    container_name: oncosearch-retention-worker
+    restart: unless-stopped
+    depends_on:
+      oncosearch-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://oncosearch_user:oncosearch_pass@oncosearch-postgres:5432/oncosearch_db
 
 volumes:
   postgres_data:
