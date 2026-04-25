@@ -1,0 +1,95 @@
+version: "3.9"
+
+# ============================================================
+# ABDM Mock Ecosystem for OncoSearch
+# ============================================================
+#
+#  postgres-db       — PostgreSQL with oncology seed data
+#  mock-gateway      — Simulates ABDM NHA gateway   (port 8000)
+#  mock-hip          — Simulates hospital HIP         (port 8001)
+#  oncosearch-hiu    — Your app (HIU)                 (port 8002)
+#
+# Start:  docker-compose up --build
+# Logs:   docker-compose logs -f
+# Stop:   docker-compose down -v
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: abdm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       abdm_mock
+      POSTGRES_USER:     abdm_user
+      POSTGRES_PASSWORD: abdm_pass
+    volumes:
+      - ./postgres-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U abdm_user -d abdm_mock"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------------------------
+  mock-gateway:
+    build:
+      context: ./mock-gateway
+    container_name: abdm-mock-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    environment:
+      HIP_URL: http://mock-hip:8001
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------
+  mock-hip:
+    build:
+      context: ./mock-hip
+    container_name: abdm-mock-hip
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://abdm_user:abdm_pass@postgres-db:5432/abdm_mock
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------
+  oncosearch-hiu:
+    build:
+      context: ./oncosearch-hiu
+    container_name: abdm-oncosearch-hiu
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    depends_on:
+      mock-gateway:
+        condition: service_healthy
+      mock-hip:
+        condition: service_healthy
+    environment:
+      GATEWAY_URL:      http://mock-gateway:8000
+      HIU_CALLBACK_URL: http://oncosearch-hiu:8002/v0.5/health-information/transfer
+
+volumes:
+  postgres_data:
